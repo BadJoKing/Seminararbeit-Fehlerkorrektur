@@ -1,0 +1,973 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[top=2.5cm, bottom=2.0cm, left=3.0cm, right=2.5cm]{geometry}
+\usepackage[ngerman]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{csquotes}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{color}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{textcomp}
+\usepackage{parskip}
+\usepackage{listings}
+\usepackage{courier}
+\usepackage{hyperref}
+\usepackage{mathptmx}
+%\usepackage{natbib}
+\usepackage[citestyle=authoryear]{biblatex}
+\addbibresource{W-Seminararbeit-12_13.bib}
+\usepackage{longtable}
+
+%Zeilenabstand → 1.5
+\renewcommand{\baselinestretch}{1.5}
+\renewcommand\lstlistingname{Abb.}
+\renewcommand{\lstlistlistingname}{Abbildungsverzeichnis}% List of Listings -> List of Algorithms
+
+\def\ZZ{\mathbb{Z}}
+\def\hv{\hfill \vline}
+\def\h{\hfill}
+\def\hhline{\hline\hline}
+\def\mak{\(m(\alpha^k)\) \hv}
+\def\is{$=$}
+
+\newif\iflistings
+\listingstrue
+
+\definecolor{green}{rgb}{0,0.7,0}
+\definecolor{gray}{rgb}{0.3,0.3,0.3}
+\definecolor{purple}{rgb}{0.5,0,0.6}
+\definecolor{backcolor}{rgb}{1,1,1}%{0.9, 0.9, 0.9}
+
+\lstdefinestyle{code_style}{
+    backgroundcolor=\color{backcolor},
+    commentstyle=\color{gray},
+    keywordstyle=\color{purple},
+    numberstyle=\color{gray},
+    stringstyle=\color{green},
+    basicstyle=\footnotesize\ttfamily,
+    breaklines=true,
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,
+    numberstyle=\texttt,
+    numbers=left,
+    numbersep=5pt,
+    frame=single,
+    language=Python,
+    literate={ö}{{\"o}}1 {ä}{{\"a}}1 {ü}{{\"u}}1 {°}{{$^\circ$}}1 {→}{{\(\rightarrow\)}}1 {ß}{{\ss}}1 {^k}{{\(^k\)}}1 {alpha}{{\(\alpha\)}}1
+}
+
+\lstset{style=code_style}
+
+\title{Fehlerkorrektur bei digitalen Nachrichten am Beispiel des Reed-Solomon-Codes}
+\author{Benjamin Antesberger}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+\pagebreak
+\tableofcontents
+
+\pagebreak
+\pagestyle{plain}
+\section{Einleitung}
+Heutzutage wird der größte Teil aller Nachrichten auf digitalem Weg versandt. 
+Der Begriff ,,Nachricht`` wird hierbei sehr weit gefasst.
+So gilt zum Beispiel eine Textnachricht über Funk aber auch der Datentransfer von einer CD auf den Laptop oder generell jede Art von digitalem Datenaustausch als eine Nachricht.
+Bei der Übertragung von Nachrichten auf digitalem Weg -- z.B. beim Einlesen einer CD -- kann es durch externe Einflüsse -- im Falle der CD zum Beispiel durch Staubkörner -- immer wieder zu Fehlern bei der Datenübertragung kommen.
+Natürlich kann man einfach mehrere Exemplare einer Nachricht versenden und dann die Version nehmen, bei der sich die meisten Exemplare einig sind. 
+Das ist jedoch sehr ineffizient, weil selbst mit der geringsten Redundanz bereits zwei Drittel der versendeten Daten keine Information liefern.\footcite[770]{weitz_konkrete_2021}
+Eine derartige Absicherung vor Übertragungsfehlern kostet somit in erster Linie Bandbreite, die zum Beispiel im Falle des Internets von anderen hätte benutzt werden können, aber auch Rechenleistung, Zeit und letzendlich auch Geld.\\
+Um nun aber Fehler erkennen und ggf. korrigieren zu können, ohne dass zu viel Platz in der Nachricht für diese Korrektur ,verschwendet` werden muss, gibt es diverse Methoden von welchen im Folgenden eine -- die Reed-Solomon-Codes (RS-Codes) -- näher beleuchtet und in einem Beispielprogramm implementiert wird.
+
+Dieser Aufsatz stützt sich primär auf das Buch ,,Konkrete Mathematik (nicht nur) für Informatiker`` von Edmumd Weitz.\footcite{weitz_konkrete_2021}
+Aus Gründen der Komplexität wurden einzelne Schritte des dem Buch entnommenen Vorgehens durch einfacher zu verstehende Vorgänge mit selbem Resultat ersetzt.
+Der Programmcode wurde jedoch -- bis auf den Algorithmus zur Bestimmung des kgV und einen Codeschnipsel zum Test für ein irreduzibles Polynom -- vollständig selbst geschrieben und aus den mathematischen Konzepten erarbeitet.
+
+\section{Mathematische Grundlagen}
+\label{sec:math_gl}
+
+\subsection{Modulare Arithmetik}
+\label{subsec:math_gl:Mod_Ar}
+Die Modulo-Operation nimmt als Input zwei Zahlen \(a \in \ZZ\) und \(b \in \ZZ \) und gibt als output den Rest, der bei der Division von $a$ mit $b$ übrig bleibt.\footcite[34]{weitz_konkrete_2021}\\
+So gilt zum Beispiel folgende Gleichung:
+\[3 \equiv 1 \pmod{2}\]
+Rechnet man Modulo n, so sagt man auch, dass man in \(\ZZ/n\ZZ\) rechnet. \(\ZZ/n\ZZ\) ist die Menge aller Reste die bei der Division mit \(n\) entstehen können.\footcite[38]{weitz_konkrete_2021} Im Folgenden wird \(\ZZ/n\ZZ\) mit \(\ZZ_n\) bezeichnet, wenn \(n\) eine Primzahl ist.\footnote{Schreibweise übernommen von \cite[68]{weitz_konkrete_2021}} 
+
+\subsection{Lagrange Interpolation}
+\label{subsec:math_gl:lag_int}
+Die Lagrange Interpolation ist ein Weg, das Polynom, das durch eine Menge an gegebenen Punkten läuft, zu bestimmen.\\
+Die Lagrange-Interpolation lässt sich folgendermaßen kurz zusammenfassen:\\
+Es sei \(m(x)\) ein Polynom von Grad \(n\) und \(\{(x_i, y_i) | 0 \leq i \leq n\}\) eine Menge mit \(n+1\) verschiedenen Werten \(y_i\) von \(m(x)\) an den jeweiligen Stellen \(x_i\). \\
+\(m(x)\) lässt sich nun folgendermaßen bestimmen:\footcite[2]{deford_lagrange_2015}\footcite[3]{kvaerno_polynomial_2021}
+\begin{equation}
+    m(x) = \sum_{i = 0}^{n} y_i l_i
+\end{equation}
+mit
+\begin{equation}
+l_i = \prod_{
+    \substack{
+        j = 0 \\ 
+        j \neq i
+    }
+}^{n} {\frac{(x-x_j)}{(x_i-x_j)}}
+\end{equation}
+
+%\subsection{Der Euklidische Algorithmus}
+%Der Euklidische Algorithmus ist ein Weg, den größten gemeinsamen Teiler (ggT) von zwei positiven ganzen Zahlen zu ermitteln. Er funktioniert wie folgt:\\
+%Für zwei positive ganze Zahlen \(a\) und \(b\) sei \(g\) der größte gemeinsame Teiler.
+%Wir nehmen an, dass \(a>b\). 
+%Das kann garantiert werden, indem man gegebenenfalls \(a\) und \(b\) vertauscht.
+%\(g\) teilt also sowohl \(a\) als auch \(b\), das heißt es gilt:
+%\begin{align*}
+%a & = g\cdot x \h \\
+%b & = g\cdot y \h \\
+%\Rightarrow & (a-b) = (gx - gy) = g(x-y) \Rightarrow g|(a-b)
+%\end{align*}
+%
+%Dementsprechend teilt \(g\) auch die Differenz aus \(a\) und \(b\). 
+%Und dementsprechend teilt \(g\) auch die Differenz aus \((a-b)\) und \(b\), die aus \((a-b-b)\) und \(b\) usw.
+%Wir können also \(b\) so oft von \(a\) abziehen, bis die Differenz kleiner ist als \(b\), weil wir ja nicht in die negativen Zahlen abrutschen wollen.
+%Dieses Vorgehen ist identisch zum Modulo Operator.
+%Über \(c = a \mod b\) können wir nun garantiert zwei Dinge behaupten:
+%\begin{enumerate}
+%    \item \(c\) ist garantiert kleiner als \(b\).
+%    \item \(c\) wird auch von \(g\) geteilt.
+%\end{enumerate}
+%Wir haben also zwischen \(b\) und \(c\) die selbe Beziehung, wie zwischen \(a\) und \(b\)
+%Ist \(c = 0\), so ist b bereits der ggT.
+%Ansonsten müssen wir den ggT von \(b\) und \(c\) berechnen.
+%Hierfür wiederholen wir diesen Prozess, aber setzen statt \(a\) und \(b\) einfach \(b\) und \(c\) ein. \footcite[54-55]{weitz_konkrete_2021}\\
+%In Programmcode könnte das zum Beispiel folgendermaßen implementiert werden\cite[56]{weitz_konkrete_2021}:
+%\iflistings
+%\begin{lstlisting}[caption=Der Euklidische Algorithmus]
+%def Euclid(a, b):
+%    if a < b:
+%        a, b = b, a
+%    while b!=0:
+%        a, b = b, a%b
+%    return a
+%\end{lstlisting}
+%\fi
+
+
+\subsection{Galoiskörper}
+Ein \textbf{Körper} \((F,+,\cdot)\) ist eine Menge \(F\), auf welcher zwei binäre Operationen \(+,\cdot: F\times F \rightarrow F\)\footnote{zu verstehen als: ,,Die Operation nimmt zwei Elemente aus \(F\) als Input und gibt ein Element aus \(F\) als Output zurück.``, daher auch die Bezeichnung ,,binär``.} definiert sind.
+Diese Operationen nennen wir Addition bzw. Multiplikation.
+Für Addition und Multiplikation gelten folgende Gesetze\footcite[5-6]{madritsch_endliche_2010}:
+\begin{description}
+    \item[Abgeschlossenheit:] \(\forall a,b \in F: (a+b \in F,\ a\cdot b \in F)\)\\
+        Jede Addition bzw. Multiplikation über \(F\) liefert als Ergebnis immer Elemente von \(F\).
+    \item[Assoziativität:] \(\forall a,b,c \in F: \left[(a + b) + c = a + (b+c)\right] \land \left[(a\cdot b)\cdot c = a\cdot (b\cdot c)\right]\)
+    \item[Kommutativität:] \(\forall a,b \in F: (a+b = b+a)\ \land\ (a\cdot b = b\cdot a)\)
+    \item[Additive Identität:] \(\exists! x \in F: \forall a \in F: a + x= a \) 
+        \hspace{1cm}
+        Dieses \(x\) bezeichnen wir mit \(0\). \footcite[3]{laurent_konstruktion_2008}
+    \item[Multiplikative Identität:] \(\exists! x \in F: \forall a \in F: a\cdot x = a \)   
+        \hspace{1cm}
+        Dieses \(x\) bezeichnen wir mit \(1\). \footcite[3]{laurent_konstruktion_2008}
+    \item[Additives Inverses:] \(\forall a \in F: \exists x\in F: a+x = 0\)
+        \hspace{1cm}
+        Dieses \(x\) nennen wir das additive Inverse von \(a\) oder kurz \(-a\).
+    \item[Multiplikatives Inverses:] \(\forall a \in F\backslash\{0\}: \exists x \in F: a\cdot x = 1 \) 
+        \hspace{1cm}
+        Dieses \(x\) nennen wir das multiplikative Inverse von \(a\) oder kurz \(a^{-1}\).
+\end{description}
+Wie genau man in einem Körper addiert oder multipliziert, ist dabei nebensächlich. 
+Wichtig ist, dass die Operationen die oben genannten Gesetzmäßigkeiten erfüllen.
+Zum Beispiel ist \((\mathbb{R}, +, \cdot)\) ein Körper, weil er diese Bedingungen erfüllt.\\
+Ein \textbf{endlicher Körper}, auch \textbf{Galoiskörper} genannt, ist nun ein Körper, der endlich viele Elemente enthält.\footcite[5-6]{madritsch_endliche_2010}
+Eine \textit{primitive Einheitswurzel} \(\alpha\) ist ein Element, dessen Potenzen alle anderen Elemente des Körpers -- außer die 0 -- ergeben. 
+Es gilt also \(\{\alpha^k | 0\leq k < 255\} = GF(2^8)\backslash\{0\} \).\footcite[773]{weitz_konkrete_2021}\\
+Ist \(p\) eine Primzahl, dann ist \(\ZZ_p \) ein Körper.\footcite[68]{weitz_konkrete_2021}
+Allgemein gibt es für jede Primzahl \(p\) und jede positive ganze Zahl \(n\) -- bis auf Isomorphie\footnote{Wenn man die Elemente des Körpers umbenennt, zum Beispiel a,b,c,\dots statt 1,2,3,\dots, erhält man einen Körper, der zwar funktional vollkommen identisch, aber trotzdem technisch gesehen ein Anderer ist.} -- genau einen Körper mit \(p^n\) Elementen.\footcite[6]{madritsch_endliche_2010}\footcite[779]{weitz_konkrete_2021}.
+%\iflistings
+%\pagebreak
+%\fi
+\section{Der Algorithmus}
+Zunächst sind des Verständnisses wegen einige wiederkehrende Muster im Programmcode mitsamt einer kurzen Erklärung aufgelistet.
+Der Code für die Klassen \texttt{poly} und \texttt{gf\_element} befindet sich im Anhang. Der gesamte verwendete Quellcode ist im Übrigen auch in einem \href{https://github.com/BadJoKing/Seminararbeit-Fehlerkorrektur}{Github-Repositorium} zu finden.
+\iflistings
+\begin{lstlisting}[caption=Wiederkehrende Muster im Programm, language=Python, frame=single]
+# gibt "Hallo, Welt!" in der Konsole aus.
+print("Hallo, Welt!")
+
+# definiert eine funktion "code", die als x als Argument entgegennimmt und dessen Nachfolger ausgibt
+def code(x):
+    # gibt den Wert von x+1 zurück
+    return x + 1
+# Ein return beendet automatisch die Funktion.
+# Die folgenden zwei Funktionen a und b sind funktional identisch.
+def a(x):
+    if x>=0:
+        return 1
+    else:
+        return 0
+def b(x):
+    if x>=0:
+        return 1
+    return 0
+
+
+# führt code(i) für jede Zahl i im inlkusiven Intervall von 0 bis x - 1 aus
+for i in range(x):
+    code(i)
+
+# erstellt eine Liste mit allen i im Intervall von 0 bis x-1
+liste1 = [i for i in range(x)]
+
+# erstellt eine Liste mit den Werten von code(i) für alle i im Intervall von 0 bis x-1
+liste2 = [code(i) for i in range(x)]
+
+# Man kann Listen auch addieren um sie zusammenzufügen
+addlists = [5,1,3,2] + [3,3,6] # wird zu [5,1,3,2,3,3,6]
+
+# Fügt die Elemente der Liste zu einem zusammenhängenden String zusammen, wobei zwischen zwei Listenelemente immer das Zeichen zwischen den Anführungszeichen vor dem Punkt kommt (hier: "0-1-Manfred-Fahrrad").
+joined = "-".join( ["0","1","Manfred","Fahrrad"] ) 
+
+# Wandelt die ganze Zahl x in das Unicode-Zeichen mit dem entsprechenden Index um. (z.B. "{0:c}".format(42) → *)
+formatted = "{0:c}".format(x) 
+
+# Wandelt die ganze Zahl x in eine 8Bit Binärzahl um (z.B. "{0:08b}".format(42) → 00101010)
+formatted2 = "{0:08b}".format(x) 
+
+# Wenn x gleich y
+if x == y:
+    # mache nichts
+    pass
+# ansonsten, wenn x ungleich y
+elif x != y:
+    code(x)
+# ansonsten
+else:
+    pass
+
+# für jedes i in liste1
+for i in liste1:
+    # falls x kleiner oder gleich 3
+    if x <= 3:
+        # springe zum nächsten i
+        continue
+    # ansonsten, wenn x = 0 (mod 5)
+    elif x % 5 == 0:
+        # beende die Schleife
+        break
+    code(i)
+\end{lstlisting}
+\fi
+Einige spezifische Muster des Beispielcodes sind hier gezeigt. 
+\iflistings
+\begin{lstlisting}
+five = gfe(5) # erstellt ein Element aus GF(2^8) dessen Dezimaldarstellung 5 ist
+
+new_Poly = poly( [gfe(4), gfe(2), gfe(0), gfe(1)] ) # erstellt ein Polynom über GF(2^8), mit den gegebenen Koeffizienten. Der Koeffizient ganz rechts hat den Exponenten 0.
+
+# Konstanten, die im Code immer wieder vorkommen:
+BLKSIZE = 255       # Die Größe eines Nachrichtenblocks
+ERRCHARS = 16       # Die Anzahl der Byte-Fehler, die maximal korrigiert werden können
+MSGCHARS = BLKSIZE - 2 * ERRCHARS   # Die Anzahl der Bytes, die für die Nachricht übrigbleiben
+ALPHA = gfe(3)      # Eine Primitive Einheitswurzel von GF(2^8)
+ZERO = poly([gfe(0)])   # Ein Polynom vom Grad 0 mit dem Wert 0
+
+\end{lstlisting}
+\fi
+
+\subsection{Die Grundidee}
+Ein Polynom vom Grad \(n\) kann durch \(n+1\) verschiedene Punkte eindeutig definiert werden.\footcite[612]{weitz_konkrete_2021}
+Um bei unserem Beispiel aus der Einleitung, von der CD, die vom Laufwerk eingelesen wird, zu bleiben, orientieren wir uns am CD-Standard.
+Dieser sieht ein Nachrichtenvolumen von 223 Bytes pro Block und ein Fehlerkorrekturvermögen von 16 Bytes pro Block vor.
+Dementsprechend benötigen wir für eine Nachricht ein Polynom des Grades 222.
+
+Wenn man nun ein Polynom \(m(x)\) vom Grad 222, wie es hier der Fall ist, übertragen will, so braucht man den Wert von \(m(x)\) an mindestens 223 Stellen. 
+Will man zudem noch die Möglichkeit haben, bis zu 16 Fehler zu korrigieren, muss man \(223+2\cdot 16\) Punkte versenden. \\
+Nehmen wir nun an, dass es einen Übertragungsfehler gab und 16 der ursprünglichen Punkte nun falsch sind.
+Man bekommt also, je nach dem, welche Punkte man wählt, ein anderes Polynom als \(m\).
+Weil \(m\) aus 223 richtigen Punkten bereits eindeutig wiederherstellbar ist, können nicht mehr als 222 richtige Punkte auf dem falschen Polynom liegen.
+Gibt es bei der Übertragung also maximal 16 Fehler, dann kann man zwar mit 222 richtigen und 16 falschen Punkten ein falsches Polynom bilden, aber mit 223+16 richtigen Punkten, also einem Punkt mehr, immer noch das ursprüngliche Nachrichtenpolynom rekonstruieren.\footcite[770-771]{weitz_konkrete_2021}
+Das heißt, dass die CD sich dank dieses RS-Codes trotz kleinerer Kratzer, welche vielleicht sogar mehrere ganze Bytes hintereinander unkenntlich machen, einwandfrei auslesen lässt.
+
+\subsection{Die Vorbereitung}
+Wir könnten die Werte von Polynomen mit reellen Koeffizienten versenden, das würde aber allein schon an den Rundungsfehlern der Binärdarstellung scheitern. 
+Zudem könnten die Werte des Polynoms -- aufgrund der Tatsache, dass man reelle Zahlen auf reelle Zahlen abbildet -- technisch gesehen unendlich groß werden, was die benötigte Bandbreite oder den Speicherplatz selbst für einfache Nachrichten unvorhersehbar macht. \footcite[772]{weitz_konkrete_2021}
+
+Für die Datenübertragung in Form von Bytes, also der für Computer üblichsten Stückelung von Daten, bräuchten wir idealerweise genug Zeichen, sodass wir mit Ihnen Binärzahlen von der Länge 8 Bit repräsentieren können. 
+Das heißt wir bräuchten einen Körper, der uns exakt \(2^8\) verschiedene Elemente zur Verfügung stellt.
+Und weil 2 eine Primzahl ist, existiert dieser Körper sogar. Er heißt \(GF(2^8)\) und lässt sich wie folgt konstruieren: \\
+\textbf{Wir benötigen:}
+\begin{description}
+    \item[1. Ein irreduzibles Polynom] \(g(x)\) vom Grad \(n\) über dem Körper \(\ZZ_p \).
+    Irreduzibel heißt, dass sich das Polynom nicht weiter faktorisieren lässt.
+    Anders gesagt gibt es kein Polynom, durch das man \(g\) teilen kann, ohne eine gebrochen rationale Funktion zu erhalten.
+    Dementsprechend bilden irreduzible Polynome ein Analog zu den Primzahlen.
+    In unserem Fall nehmen wir ein Polynom vom Grad 8 über dem Körper \(\ZZ_2 \). 
+    Dass \(g(x) = x^8+x^4+x^3+x+1\) irreduzibel ist, lässt sich mit folgendem Code einfach nachprüfen\footnote{Code adaptiert von \cite[781]{weitz_konkrete_2021}. Zu finden im Ordner \texttt{Beispielprogramm} unter dem Namen \texttt{irreducible.py}}:
+    \iflistings
+    \begin{lstlisting}[caption=Test für ein irreduzibles Polynom]
+from sympy import Poly
+from sympy.abc import x
+g = Poly(x**8+x**4+x**3+x+1, modulus=2)
+print(g.is_irreducible)
+    \end{lstlisting}
+    \fi
+        Die Elemente des Körpers wird die Menge aller Polynome vom Grad kleiner als \(8\) -- also aller Reste, die bei der Division mit \(g\) entstehen können -- sein. Um die Darstellung zu vereinfachen, drücken wir die Polynome durch ihre Koeffizienten aus, welche sich gut als Binärzahlen darstellen lassen.\footcite[781]{weitz_konkrete_2021}
+        
+    \item[2. Eine Methode der Addition:] 
+    Bei der Addition von zwei Polynomen addiert man die jeweiligen Koeffizienten mit dem selben Exponenten. 
+    Da wir in \(\ZZ_2\) rechnen, sieht die Additionstabelle für die Addition zweier Koeffizienten folgendermaßen aus:
+    \begin{longtable}{ccc}
+    + \hv & 0 & 1\\
+    \hline
+    0 \hv & 0 & 1 \\
+    1 \hv & 1 & 0
+    \end{longtable}
+    Das ist exakt die Wahrheitstabelle für die Boole`sche Operation des exklusiven Oder (XOR).\footcite[781]{weitz_konkrete_2021}
+    Weil wir diese Operation Koeffizient für Koeffizient anwenden, lässt sich die Addition von zwei Polynomen über \(\ZZ_2\) dementsprechend mit der in jedem Computer eingebauten Bitweisen XOR-Operation ersetzen.
+    
+    \item[3. Eine Methode der Multiplikation:] Hierzu multiplizieren wir zwei Elemente \(a\) und \(b\) zunächst wie gewöhnliche Polynome über \(\ZZ_2\) und berechnen dann den Rest, der bei einer Division mit \(g\) entsteht. \\
+    Kürzer geschrieben ist die Multiplikation das Ergebnis von \((a\cdot b) \mod g\).\footcite[781]{weitz_konkrete_2021}\\
+    Das Rechnen in Galoiskörpern unterscheidet sich also kaum vom Rechnen in anderen endlichen Körpern, man muss sich nur daran gewöhnen, dass man mit Polynomen und nicht mit ganzen Zahlen rechnet.\\
+    Die Multiplikation lässt sich effizienter implementieren, indem man sich eine primitive Einheitswurzel \(\alpha \in GF(2^8)\), zum Beispiel \(x+1\) bzw. \texttt{11}, nimmt und eine Liste mit allen Potenzen dieser Einheitswurzel erstellt:
+    \iflistings
+    \begin{table}[h]
+        \centering
+        \begin{tabular}{lccccccc}
+            \(k\) \h\vline & 0 & 1 & 2 & 3 & 4 & 5 & \dots\\
+            \(\alpha^k\) \h\vline & 1 & 11 & 101 & 1111 & 10001 & 110011 & \dots
+        \end{tabular}
+    \end{table}
+    \fi
+    \\Anschließend entnimmt man aus der Liste die Indizes \(k_a\) und \(k_b\), an denen \(a\) bzw. \(b\) zu finden sind und nimmt dann das Listenelement mit dem Index \((k_a + k_b) \mod 255\).\footcite[782]{weitz_konkrete_2021}
+    \item[4. Die Identitäten:] Die additive Identität ist \texttt{0} und die Multiplikative ist \texttt{1}.  
+    \item[5. Die Inversen:] Das additive Inverse von \(a\in K \) ist \(a\), weil der XOR-Operator bei zwei gleichen Inputs 0 zurück gibt.\\
+    Ist \(a \in K = \alpha^{k_a} \), dann ist \(a^{-1} = \alpha^{k_{a^{-1}}} = \alpha^{255-k_a} \), weil \(k_a+k_{a^{-1}} = 0 \pmod{255}\) sein muss. 
+\end{description}
+Man kann Elemente von \(GF(2^8)\) unterschiedlich darstellen:
+\begin{description}
+    \item[Als Polynom] der Form \(ax^7+bx^6+cx^5+dx^4+ex^3+fx^2+gx+h\) mit \(a,b,c,d,e,f,g,h \in \{0,1\}\),
+    \item[Als Binärzahl,] welche die Koeffizienten darstellt (Ein Koeffizient kann entweder 0 oder 1 sein, deshalb lassen sich Polynome vom Grad 7 besonders gut als 8-Bit-Binärzahl darstellen.)
+    \item[Als Dezimalzahl,] indem man die Binärdarstellung als Zahl behandelt und ins Dezimalsystem umrechnet. Da dies die am wenigsten platz-intensive Methode ist, wird das die im Folgenden am meisten benutzte Darstellung sein.
+\end{description}
+
+\subsection{Die Verschlüsselung}
+Nehmen wir eine Nachricht, zum Beispiel ,,hallo``. 
+Diese Zeichenkette konvertieren wir zuerst in 8-Bit lange Binärzahlen, um sie mit \(GF(2^8)\) kompatibel zu machen.
+Anschließend setzen wir diese Elemente als Koeffizienten in unser Nachrichtenpolynom \(m(x)\) ein und erweitern dieses gegebenenfalls noch mit genügend vielen Nullkoeffizienten, um auf den Grad 222 (für 223 Bytes an Information) zu kommen.
+Das Polynom sieht dann folgendermaßen aus:
+\[
+    m(x) = 104x^{222}+97x^{221}+108x^{220}+108x^{219}+111x^{218}+0x^{217}+\dots+0x^0
+\]
+Diese Aufgabe übernimmt folgender Programmcode für uns:
+\iflistings
+\begin{lstlisting}[caption=Erstellen des Nachrichtenpolynoms]
+msg = poly([gfe(ord(i)) for i in message]           # Die Nachricht
+    + [gfe(0)] * (MSGCHARS - len(message)))         # Das "Füllmaterial" um auf die richtige Länge zu kommen
+\end{lstlisting}
+\fi
+Dieses eben erstellte Polynom \(m(x)\) werten wir zunächst an 255 verschiedenen, vorher beidseitig gleichermaßen festgelegten Stellen aus.
+Wir verwenden dazu die Potenzen von \(\alpha \), also alle \( x \in \{\alpha^k | 0\leq k \leq 254\}\).\footcite[773]{weitz_konkrete_2021}
+Welche Reihenfolge wir dann für diese Werte nehmen, ist egal. 
+Wichtig ist nur, dass wir erstens die 0 nicht als Stelle nehmen -- weil sonst die später wichtige Gleichung \(x^{255} = 1\) für diese eine Stelle nicht stimmt -- und dass zweitens beide Seiten die selbe Reihenfolge verwenden, damit die \(x\)-Werte bei der Interpolation zu den \(y\)-Werten passen.
+Die Werte von \(m(\alpha^k)\) sehen folgendermaßen aus (\(k\) beginnt oben links bei 0 wird erst von links nach rechts und dann von oben nach unten größer):
+\iflistings
+\begin{longtable}{ccccccccccc}
+102 \hv & 196 \hv & 243 \hv & 245 \hv & 245 \hv & 98 \hv & 179 \hv & 29 \hv & 165 \hv & 186 \hv & 242\\ \hline 
+204 \hv & 223 \hv & 91 \hv & 19 \hv & 128 \hv & 136 \hv & 39 \hv & 195 \hv & 64 \hv & 96 \hv & 26\\ 
+\vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots\\ 
+207 \hv & 217 \hv & 252 \hv & 75 \hv & 4 \hv & 33 \hv & 134 \hv & 67 \hv & 183 \hv & 123 \hv & 255\\ \hline 
+102 \hv & 207 \hv &  & & & & & & & & \\ 
+\caption{Die Werte von \(m(x)\)}
+\end{longtable}
+\fi
+Der Programmcode dazu sieht so aus:
+\iflistings
+\begin{lstlisting}[caption=Auswerten des Nachrichtenpolynoms]
+def encode(message):
+    # global lässt uns auf globale Variablen zugreifen
+    global MSGCHARS, ERRCHARS, BLKSIZE, ALPHA
+    # hier wird das Nachrichtenpolynom erstellt
+    msg = poly([gfe(ord(i)) for i in message] 
+        + [gfe(0)] * (MSGCHARS - len(message)))
+    # gibt eine Liste mit den Werten von msg an den Stellen alpha^k zurück
+    return [msg(ALPHA ** (i)) for i in range(BLKSIZE)]
+\end{lstlisting}
+\fi
+Diese Liste schicken wir weiter an den Empfänger. Mit einem Zufallsgenerator verteilen wir schließlich Fehler in der Nachricht:
+\iflistings
+\begin{lstlisting}[caption=Der Fehlergenerator]
+def inserrRB(message, x):
+    msg = [i for i in message]
+    errcache = []
+    for i in range(x):
+        z = ran.randint(0,254)
+        # Garantiert eine einzigartige Zufallszahl
+        while z in errcache:
+            z = ran.randint(0,254)
+        msg[z] += gfe(ran.randint(1,254))
+    debug(1,"Errors inserted at positions:",*(i for i in errcache))
+    return msg
+\end{lstlisting}
+\fi
+
+\subsection{Die Entschlüsselung}
+\subsubsection{Schritt 1: Die erste Interpolation}
+Aus der erhaltenen Liste versuchen wir im ersten Schritt, ein Polynom wiederherzustellen.\footcite[773-774]{weitz_konkrete_2021}
+Das gelingt mit der Lagrange-Interpolation.
+Eine Beispielimplementierung ist wie folgt:
+\iflistings
+\begin{lstlisting}[caption=Beispielcode für eine Lagrange-Interpolation]
+def lagrange(values, indices):
+    global ALPHA, ZERO
+    # Erstellt die Liste mit den passenden Stellen
+    x_vals = [ALPHA**i for i in indices]
+    # Initialisiert ein Polynom L(x) = 0, welches später das Gesamtergebnis wird
+    L = ZERO
+    for i, x_i in enumerate(x_vals):
+        # initialisiert den Zähler von l_i als f(x) = 1
+        zaehler = x(0)
+        # initialisiert den Nenner von l_i als eine leere Liste
+        nenner = []
+        for j, x_j in enumerate(x_vals):
+            if j != i:
+                # Multipliziert den Zähler in jedem Schritt mit (x-x_j)
+                zaehler = zaehler.flshift(1) + zaehler.scale(x_j)
+                # Fügt (x_i-x_j) zum Nenner hinzu
+                nenner.append((x_i-x_j))
+            else:
+                continue
+        # multipliziert alle Elemente der Nennerliste auf einen Schlag
+        nenner = gfe.prod(nenner)
+        l_i = zaehler.scale(values[i]*nenner.inv())
+        # Addiert l_i zum Gesamtergebnis
+        L+=l_i
+    return L
+\end{lstlisting}
+\fi
+Wir haben zwar nur die \(y\)-Werte des Polynoms bekommen, aber die \(x\)-Gegenstücke können wir uns mit \(\alpha^k\) leicht selbst generieren (siehe Code).\\
+Angenommen, die ersten 16 stellen unserer Nachricht wurden verändert und lauten nun:
+\begin{longtable}{cccccccccccccccc}
+62 & 186 & 239 & 232 & 219 & 249 & 15 & 250 & 84 & 59 & 250 & 236 & 91 & 176 & 81 & 164
+\end{longtable}
+Wenn wir an dieser veränderten Liste an Werten die Lagrange-Interpolation durchführen, erhalten wir folgendes Polynom:
+\[
+\begin{aligned}
+r(x) =\ & 184x^{254}+7x^{253}+184x^{252}+39x^{251}+128x^{250}+204x^{249}+247x^{248}\\
++\ & 52x^{247}+227x^{246}+89x^{245}+102x^{244}+102x^{243}+39x^{242}+248x^{241} \\
++\ & 153x^{240}+73x^{239} + \dots + 255x^{2}+41x^{1}+152x^{0}
+\end{aligned}
+\]
+Es ist offensichtlich, dass \(r\) nicht unser Nachrichtenpolynom ist, weil sein Grad anders ist als der, den wir von \(m\) erwarten.
+Wäre \(r\) unser gesuchtes Polynom, dann hätte es den Grad 222. 
+Der Grad von \(r\) muss außerdem größer sein als der von \(m\), wenn die Nachricht fehlerbehaftet ist:
+Nehmen wir an, dass es nicht mehr als 16 Fehler bei der Übertragung gibt, so finden sich in unserer Nachricht 223 Punkte, die auf jeden Fall auf \(m\) liegen. \footnote{Es gibt noch 16 weitere solche Werte, aber da \(m\) bereits durch die 223 richtigen Werte eindeutig beschrieben ist, ignorieren wir sie vorerst einmal.}
+Da \(m\) das einzige Polynom vom Grad \(\leq 222\) ist, das durch diese 223 Punkte geht\footcite[612]{weitz_konkrete_2021}, muss das Polynom, das durch diese Punkte \textbf{und} beliebige zusätzliche, nicht auf \(m\) liegenden Punkte geht, einen Grad von mindestens 223 haben.
+Deshalb wissen wir zweifelsfrei, dass \(r\) nicht \(m\) ist, wenn der Grad von \(r\) größer als 222 ist.\\
+\subsubsection{Schritt 2: Die Fehlerfindung}
+Das sogenannte Fehlerpolynom \(e(x)\) ist definiert als \(r(x)-m(x)\)\footcite[774]{weitz_konkrete_2021} und hat somit den selben Grad, wie \(r\). 
+Weil \(r = m+e\) ist, hat \(e\) an allen Stellen, an denen \(r = m\) ist, eine Nullstelle, weil sich \(m\) dort nach Addition mit \(e\) nicht verändert hat.
+Dementsprechend lässt es sich als Produkt von Linearfaktoren \(x-x_i\) beschreiben, wobei \(x_i\) die Stellen sind, an denen es keinen Fehler gab.\\
+Nehmen wir uns ein neues Polynom \(n = x^{255}-1\), welches für alle \(x \in GF(2^8)\backslash\{0\} \) gleich 0 ist. Das ist der Fall, weil \(x^{255}\) für alle \(x\neq 0\) gleich 1 ist\footcite[775]{weitz_konkrete_2021}, was sich mit folgendem Code einfach nachweisen lässt:
+\iflistings
+\begin{lstlisting}[caption=$n(x) \is 0\ \forall x \in GF(2^8)\backslash \{0\}$]
+# set() nimmt eine Liste und fasst alle mehrfach vorkommenden Elemente zu einem zusammen
+# Wenn also set(x) die länge 1 hat, dann sind alle Elemente in x gleich
+print( len( set( [gfe(i)**255 for i in range(1,256)] ) ) == 1 )
+\end{lstlisting}
+\fi
+\(e\) und \(n\) haben die Nullstellen gemeinsam, an denen kein Fehler aufgetreten ist. 
+Das kleinste gemeinsame Vielfache (kgV) von \(e\) und \(n\) hat, weil es ein Vielfaches von \(n\) ist, die selben Nullstellen, wie \(n\). 
+Das heißt, für \(d(x)\) mit \(de = wm\) sind die Nullstellen die Stellen, an denen die Nachricht Fehler hat.\footcite[776]{weitz_konkrete_2021}
+Glücklicherweise gibt es einen Algorithmus, um genau dieses \(d\) zu berechnen.
+Der folgende Code ist eine auf das Nötigste herunter gebrochene Version einer veränderten Form des erweiterten Euklidischen Algorithmus, welche neben dem kgV unter Anderem auch den ggT berechnet.\footcite[776]{weitz_konkrete_2021}\footcite[24]{weitz_losungen_2024}
+\iflistings
+\begin{lstlisting}[caption=kgV Berechnen]
+def kgV(a, b):
+    if a.deg < b.deg:
+        a, b = b, a
+    d0, d = ZERO, x(0)
+    while a.deg > MSGCHARS+ERRCHARS:
+        tmp = a.divmod(b)
+        f = tmp[0]
+        a, b = b, tmp[1]
+        d0, d = d, f*d+d0
+    return d
+\end{lstlisting}
+\fi
+Der Rückgabewert dieser Funktion ist unser oben gesuchtes \(d\). In unserem Fall sieht \(d\) so aus:
+\begin{align*}
+    d(x) =\ &  248x^{16}+109x^{15}+146x^{14}+47x^{13}+147x^{12}+125x^{11}+137x^{10}+152x^{9}+95x^{8}\\
+    +\ & 11x^{7}+176x^{6}+159x^{5}+101x^{4}+99x^{3}+202x^{2}+13x^{1}+109
+\end{align*}
+Nun gilt es, die Nullstellen dieses Polynoms zu ermitteln.
+Dazu iterieren wir einfach über alle Stellen, an denen \(d\) definiert ist, setzen die x-Werte in \(d\) ein und notieren sie uns, wenn \(d(x) = 0\) ist.
+Die Funktion, die die Fehlerstellen findet, sieht dann so aus:
+\iflistings
+\begin{lstlisting}[caption=Fehlerstellen finden]
+def errloc(res_poly):
+    global BLKSIZE, ALPHA
+    n = x(BLKSIZE) - x(0)
+    Lambda = kgV(n, res_poly)
+    X = []
+    for i in range(BLKSIZE):
+        if Lambda(ALPHA**(i)) == 0:
+            X.append(i)
+    return X
+\end{lstlisting}
+\fi
+Für unser \(d\) gibt die Funktion richtigerweise das Intervall \([0;15]\) zurück. 
+Nachdem wir nun die Fehlerstellen identifiziert haben, können wir diese Stellen der fehlerbehafteten Werteliste bei der Interpolation einfach überspringen.
+\subsubsection{Schritt 3: Die zweite Interpolation}
+Der Code zum Auswählen der Stellen für die zweite Interpolation nimmt nicht alle verfügbaren richtigen Stellen, sondern nur so viele, wie für die Wiederherstellung von \(m\) unbedingt notwendig sind. Das spart etwas Rechenzeit im Vergleich zur Interpolation mit allen möglichen Stellen.
+\iflistings
+\begin{lstlisting}[caption=Erneutes Interpolieren mit weniger Werten]
+    err_indices = [i for i in errloc(respoly)]
+    indices = []
+    # Diese Schleife füllt eine Liste mit exakt so vielen richtigen Indizes auf, wie man benötigt um m(x) wiederherzustellen
+    i = 0
+    while len(indices) < MSGCHARS:
+        if i not in err_indices:
+            indices.append(i)
+        i += 1
+    res = lagrange([message[i] for i in indices], indices)
+\end{lstlisting}
+\fi
+Die vollständige Dekodierfunktion ist nicht viel länger:
+\iflistings
+\begin{lstlisting}
+def decode(message):
+    global BLKSIZE, ERRCHARS, ALPHA, errcache
+    respoly = lagrange(message, range(BLKSIZE))
+    err_indices = []
+    if len(set(respoly.coeffs[(MSGCHARS+1):])) == 1 and respoly.coeffs[-1] == 0:
+        return "".join(["{0:c}".format(i.val) for i in respoly.coeffs]).strip("\00")
+    else:
+        err_indices = [i for i in errloc(respoly)]
+    indices = []
+    i = 0
+    while len(indices) < MSGCHARS:
+        if i not in err_indices:
+            indices.append(i)
+        i += 1
+    res = lagrange([message[i] for i in indices], indices)
+    ret = "".join(["{0:c}".format(i.val) for i in res.coeffs]).strip("\00")
+    return ret
+\end{lstlisting}
+\fi
+\subsubsection{Grenzen unseres Codes}
+Die meisten CDs sind aber größer als 223 Bytes. 
+Wollen wir mit unserem Code Nachrichten versenden, die mehr als 223 Zeichen lang sind, müssen wir die Nachricht in verschiedene Blöcke Aufteilen und diese einzelnen Blöcke separat kodieren.
+Eine Beispiellösung wäre Folgendes:\\
+Man erstellt eine neue \texttt{encode()}-Funktion und benennt die Alte in \texttt{encode\_block()} um. Die neue \texttt{encode()} Funktion teilt die Nachricht in 223-Zeichen-Blöcke auf und kodiert sie der Reihe nach.
+\iflistings
+\begin{lstlisting}[caption=Die neue encode()-Funktion]
+def encode(message):
+    blocks = []
+    while len(message)>223:
+        blocks.append(message[:223])
+        message = message[223:]
+    blocks.append(message)
+    enc_blocks = []
+    for i, block in enumerate(blocks):
+        enc_blocks.append(encode_block(block))
+    return enc_blocks
+\end{lstlisting}
+\fi
+Das Dekodieren funktioniert ähnlich:
+\iflistings
+\begin{lstlisting}[caption=Die neue decode()-Funktion]
+def decode(blocks):
+    dec_blocks = []
+    for i, block in enumerate(blocks):
+        debug(1, "Decoding block Nr.", i+1)
+        dec_blocks.append(decode_block(block))
+    return "".join(dec_blocks)
+\end{lstlisting}
+\fi
+Sie gibt allerdings keine Liste, sondern die rekonstruierte Zeichenkette wieder aus.
+Mit Hilfe dieser Zerstückelung könnte man beispielsweise sogar ein ganzes Filmskript kodieren.
+
+\section{Zusammenfassung}
+Reed-Solomon-Codes bieten eine gute Möglichkeit, fehlerresistente digitale Nachrichten mit wenig Redundanz zu übertragen.
+Sie sind viel komplexer als andere, offensichtlichere Fehlerkorrekturmethoden, sind aber durch ihre hohe Informationsdichte deutlich effizienter und dadurch langfristig günstiger.
+Ihnen ist zum Beispiel zu verdanken, dass man Musikalben nicht auf mehrere CDs verteilen muss, weil sonst der Speicherplatz nicht ausreicht.\\
+Die Implementierung insbesondere des Dekodierverfahrens ist sehr komplex und erfordert umfangreiche mathematische Vorkenntnisse und -- je nach Art der Implementierung -- Vorwissen über Programmierung bzw. Schaltungslogik.
+Ist ein RS-Code jedoch einmal implementiert, so kann man ihn mit nur wenig Veränderungen für andere Datentypen verwenden.
+Wir haben ASCII-Zeichen übertragen, man kann mit den selben Bits jedoch auch bereits kompilierte Programme, Audiodateien oder Bilder übertragen und muss nur die Interpretation der Daten anpassen.
+\pagebreak
+\appendix
+\section{Restlicher Programmcode}
+Diese Code-Ausschnitte wurden nicht explizit behandelt, sie sind aber trotzdem hier angefügt, weil die Art, wie bestimmte Funktionen implementiert sind ein Stück weit bestimmt, wie die oben behandelten Funktionen aussehen.
+Jemandem ohne Zugriff auf die ursprünglichen Programmdateien soll dies eine Möglichkeit bieten, die Implementierung besser nachvollziehen zu können.
+\subsection{Helferfunktionen}
+\iflistings
+\begin{lstlisting}[caption=debug() \& Co.]
+loglevel = 0
+
+def set_loglevel(x):
+    global loglevel
+    loglevel = x
+
+# Erbt es, die Menge der vom Programm mitgeteilten Information zu steuern
+def debug(x, *args, **kwargs):
+    global loglevel
+    if loglevel>=x:
+        print(*args, *kwargs)
+\end{lstlisting}
+
+\begin{lstlisting}[caption=x()]
+# Erleichtert es, Monome vom Grad x zu erstellen
+def x(x):
+    return poly([gf_element(1)]+[gf_element(0)]*x)
+\end{lstlisting}
+\fi
+
+
+\subsection{Die Klassen ,,gf\_element`` und ,,poly``}
+\label{code.gfe}
+\iflistings
+\begin{lstlisting}[caption=Die gf\_element-Klasse]
+class gf_element():
+    # Diese Listen wurden übernommen von: https://github.com/brownan/Reed-Solomon/blob/master/ff.py
+    # Die Idee, Eigene Klassen für die Galoiskörperelemente bzw. Polynome zu erstellen und die eingebauten Operatoren zu überschreiben stammt auch von dort, der genaue Inhalt der Funktionen wurde allerdings eigenständig erarbeitet.
+    m_lut = (1, 3, 5, 15, 17, 51, 85, 255, 26, 46, 114, 150, 161, 248, 19, 53, 95, 225, 56, 72, 216, 115, 149, 164, 247, 2, 6, 10, 30, 34, 102, 170, 229, 52, 92, 228, 55, 89, 235, 38, 106, 190, 217, 112, 144, 171, 230, 49, 83, 245, 4, 12, 20, 60, 68, 204, 79, 209, 104, 184, 211, 110, 178, 205, 76, 212, 103, 169, 224, 59, 77, 215, 98, 166, 241, 8, 24, 40, 120, 136, 131, 158, 185, 208, 107, 189, 220, 127, 129, 152, 179, 206, 73, 219, 118, 154, 181, 196, 87, 249, 16, 48, 80, 240, 11, 29, 39, 105, 187, 214, 97, 163, 254, 25, 43, 125, 135, 146, 173, 236, 47, 113, 147, 174, 233, 32, 96, 160, 251, 22, 58, 78, 210, 109, 183, 194, 93, 231, 50, 86, 250, 21, 63, 65, 195, 94, 226, 61, 71, 201, 64, 192, 91, 237, 44, 116, 156, 191, 218, 117, 159, 186, 213, 100, 172, 239, 42, 126, 130, 157, 188, 223, 122, 142, 137, 128, 155, 182, 193, 88, 232, 35, 101, 175, 234, 37, 111, 177, 200, 67, 197, 84, 252, 31, 33, 99, 165, 244, 7, 9, 27, 45, 119, 153, 176, 203, 70, 202, 69, 207, 74, 222, 121, 139, 134, 145, 168, 227, 62, 66, 198, 81, 243, 14, 18, 54, 90, 238, 41, 123, 141, 140, 143, 138, 133, 148, 167, 242, 13, 23, 57, 75, 221, 124, 132, 151, 162, 253, 28, 36, 108, 180, 199, 82, 246, 1)
+    index_lut = (None, 0, 25, 1, 50, 2, 26, 198, 75, 199, 27, 104, 51, 238, 223, 3, 100, 4, 224, 14, 52, 141, 129, 239, 76, 113, 8, 200, 248, 105, 28, 193, 125, 194, 29, 181, 249, 185, 39, 106, 77, 228, 166, 114, 154, 201, 9, 120, 101, 47, 138, 5, 33, 15, 225, 36, 18, 240, 130, 69, 53, 147, 218, 142, 150, 143, 219, 189, 54, 208, 206, 148, 19, 92, 210, 241, 64, 70, 131, 56, 102, 221, 253, 48, 191, 6, 139, 98, 179, 37, 226, 152, 34, 136, 145, 16, 126, 110, 72, 195, 163, 182, 30, 66, 58, 107, 40, 84, 250, 133, 61, 186, 43, 121, 10, 21, 155, 159, 94, 202, 78, 212, 172, 229, 243, 115, 167, 87, 175, 88, 168, 80, 244, 234, 214, 116, 79, 174, 233, 213, 231, 230, 173, 232, 44, 215, 117, 122, 235, 22, 11, 245, 89, 203, 95, 176, 156, 169, 81, 160, 127, 12, 246, 111, 23, 196, 73, 236, 216, 67, 31, 45, 164, 118, 123, 183, 204, 187, 62, 90, 251, 96, 177, 134, 59, 82, 161, 108, 170, 85, 41, 157, 151, 178, 135, 144, 97, 190, 220, 252, 188, 149, 207, 205, 55, 63, 91, 209, 83, 57, 132, 60, 65, 162, 109, 71, 20, 42, 158, 93, 86, 242, 211, 171, 68, 17, 146, 217, 35, 32, 46, 137, 180, 124, 184, 38, 119, 153, 227, 165, 103, 74, 237, 222, 197, 49, 254, 24, 13, 99, 140, 128, 192, 247, 112, 7)
+    def __init__(self, x):
+        if x<0:
+            x*=-1
+        self.val = x%256
+        self.char = "{0:c}".format(x)
+    
+    def __add__(a, b):
+        if b == 0:
+            return a
+        return gf_element(a.val^b.val)
+
+    def __sub__(a,b):
+        return a.__add__(b)
+    
+    def __radd__(a,b):
+        return a.__add__(b)
+    
+    def __mul__(a, b):
+        if a == 0 or b == 0:
+            return gf_element(0)
+        try:
+            return gf_element(gf_element.m_lut[(gf_element.index_lut[a.val]+gf_element.index_lut[b.val])%255])
+        except IndexError:
+            print(a.val)
+            exit(1)
+    
+    def __pow__(a, x):
+        if a == 0:
+            return gf_element(0)
+        return gf_element(gf_element.m_lut[(gf_element.index_lut[a.val]*x)%255])
+    
+    def inv(self):
+        if self.val == 0:
+            return gf_element(0)
+        return gf_element(gf_element.m_lut[255-gf_element.index_lut[self.val]])
+    
+    
+    def __truediv__(a, b):
+        if a == 0:
+            return gf_element(0)
+        if b == 0:
+            raise ValueError("Cannot divide by 0")
+        return a*b.inv()
+    
+    def __eq__(self, other):
+        if other is None:
+            return False
+        if isinstance(other, int):
+            return self.val == other
+        return self.val == other.val
+    
+    def __repr__(self):
+        return self.__str__()
+    
+    def __str__(self):
+        return str(self.val)
+    
+    def __hash__(self):
+        return hash(self.val)
+\end{lstlisting}
+\fi
+
+\label{code.poly}
+\iflistings
+\begin{lstlisting}[caption=Die poly-Klasse]
+# Alle Funktionen der Form __name__ überschreiben Python-interne Funktionen, sodass sich klassenspezifische Methoden zum Addieren, Multiplizieren, etc. definieren lassen.
+class poly():
+    def __init__(self, coefficients):
+        if coefficients == 0:
+            self.coeffs = [gf_element(0)]
+        else:
+            self.coeffs = [i for i in coefficients]
+        self.udeg()
+
+    def __add__(a, b):
+        ac = a.coeffs
+        bc = b.coeffs
+        match a.deg>b.deg:
+            case True:
+                bc = [gf_element(0)]*(a.deg-b.deg)+bc
+            case False:
+                ac = [gf_element(0)]*(b.deg-a.deg)+ac
+        return poly(x+y for x,y in zip(ac,bc))
+
+    __sub__ = __add__
+
+    def __mul__(a, b):
+        if isinstance(b, gf_element):
+            return poly(i*b for i in a.coeffs)
+        ac = a.coeffs
+        bc = b.coeffs
+        res = [gf_element(0) for _ in range(a.deg+b.deg+1)]
+        for i, ae in enumerate(ac):
+            for j, be in enumerate(bc):
+                res[i+j] += ae*be
+        return poly(res)
+    
+    def divmod(a, b):
+        dividend = a.coeffs.copy()
+        divisor = b.coeffs.copy()
+        quot = []
+        while len(dividend) >= len(divisor):
+            if dividend[0] == 0:
+                quot.append(dividend.pop(0))
+                continue
+            quot.append(dividend[0]/divisor[0])
+            for i in range(len(divisor)):
+                dividend[i] -= divisor[i]*quot[-1]
+            dividend.pop(0)
+        return poly(quot), poly(dividend)
+
+    def __truediv__(self, other):
+        if isinstance(other, gf_element):
+            return poly([i/other for i in self.coeffs])
+        return self.divmod(other)[0]
+
+    def __mod__(self, other):
+        return self.divmod(other)[1]
+    
+    def flshift(self, x):
+        c = self.coeffs.copy()
+        c += [gf_element(0)]*x
+        return poly(c)
+    
+    def udeg(self):
+        self.deg = len(self.coeffs)-1
+    
+    def eval(self, x):
+        return sum([a*x**(self.deg-i) for i, a in enumerate(self.coeffs)])
+    
+    def __call__(self, x):
+        return self.eval(x)
+
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return self.coeffs[0] == other and self.coeffs[-1] == other
+        return self.coeffs == other.coeffs
+
+    def __str__(self):
+        res = (f"{x}x^{self.deg-y}" for y, x in enumerate(self.coeffs))
+        return "+".join(res)
+    
+    def __repr__(self):
+        return str(self.coeffs)
+    
+    def __neg__(self):
+        return poly(-i for i in self.coeffs)
+    
+    def scale(self, x):
+        self.coeffs = [i*x for i in self.coeffs]
+        return self
+\end{lstlisting}
+\fi
+\subsection{Beispielcode für die Kodierung}
+\iflistings
+\begin{lstlisting}[caption=Das Beispielprogramm]
+from gf256 import gf_element as gfe, poly, debug, set_loglevel, x
+import time
+import random as ran
+
+BLKSIZE = 255
+ERRCHARS = 16
+MSGCHARS = BLKSIZE - 2 * ERRCHARS
+ALPHA = gfe(3)
+ZERO = poly([gfe(0)])
+
+def encode_block(message):
+    global MSGCHARS, ERRCHARS, BLKSIZE, ALPHA
+    debug(2, "Constructing message polynomial...")
+    msg = poly([gfe(ord(i)) for i in message] + [gfe(0)] * (MSGCHARS - len(message)))
+    debug(3, msg.coeffs)
+    debug(2, "Encoding message...")
+    return [msg(ALPHA ** (i)) for i in range(BLKSIZE)]
+
+def encode(message):
+    debug(1,"Organizing the message into blocks of 223...")
+    blocks = []
+    while len(message)>223:
+        blocks.append(message[:223])
+        message = message[223:]
+    blocks.append(message)
+    enc_blocks = []
+    for i, block in enumerate(blocks):
+        debug(1, "Encoding block Nr.", i+1)
+        enc_blocks.append(encode_block(block))
+        debug(1, "done")
+    return enc_blocks
+
+def decode_block(message):
+    global BLKSIZE, ERRCHARS, ALPHA, errcache
+    debug(1, "Receiving block")
+    respoly = lagrange(message, range(BLKSIZE))
+    err_indices = []
+    if respoly.deg == 222:
+        debug(1, "No errors detected.")
+        return "".join(["{0:c}".format(i.val) for i in respoly.coeffs]).strip("\00")
+    else:
+        debug(1, "The message has errors")
+        err_indices = [i for i in errloc(respoly)]
+    indices = []
+    i = 0
+    while len(indices) < MSGCHARS:
+        if i not in err_indices:
+            indices.append(i)
+        i += 1
+    res = lagrange([message[i] for i in indices], indices)
+    ret = "".join(["{0:c}".format(i.val) for i in res.coeffs]).strip("\00")
+    return ret
+
+def decode(blocks):
+    debug(1, "Decoding the Message.")
+    dec_blocks = []
+    for i, block in enumerate(blocks):
+        debug(1, "Decoding block Nr.", i+1)
+        dec_blocks.append(decode_block(block))
+    return "".join(dec_blocks)
+
+
+def lagrange(values, indices):
+    global ALPHA, ZERO
+    debug(1, "Interpolating the message polynomial...")
+    x_vals = [ALPHA**i for i in indices]
+    L = ZERO
+    for i, x_i in enumerate(x_vals):
+        if i%30 == 0:
+            debug(1, "{0:.2f}%".format(100*i/len(x_vals)))
+        zaehler = x(0)
+        nenner = []
+        for j, x_j in enumerate(x_vals):
+            if j != i:
+                zaehler = zaehler.flshift(1) + zaehler.scale(x_j)
+                nenner.append((x_i-x_j))
+            else:
+                continue
+        nenner = gfe.prod(nenner)
+        l_i = zaehler.scale(values[i]*nenner.inv())
+        L+=l_i
+    debug(1, "100.00%")
+    return L
+
+def kgV(a, b):
+    if a.deg < b.deg:
+        a, b = b, a
+    a0 = a
+    d0, d = ZERO, x(0)
+    while a.deg > MSGCHARS+ERRCHARS:
+        tmp = a.divmod(b)
+        f = tmp[0]
+        a, b = b, tmp[1]
+        d0, d = d, f*d+d0
+    return d
+
+def errloc(res_poly):
+    global BLKSIZE, ALPHA
+    debug(1, "Locating errors...")
+    n = x(BLKSIZE) - x(0)
+    Lambda = kgV(n, res_poly)
+    debug(2, "deg(Lambda) =",Lambda.deg)
+    X = []
+    for i in range(BLKSIZE):
+        if Lambda(ALPHA**(i)) == 0:
+            X.append(i)
+    debug(1, "Errors found at bytes: ", [i for i in X])
+    return X
+
+def inserrRB(message, x):
+    msg = [i for i in message]
+    errcache = []
+    for i in range(x):
+        z = ran.randint(0,254)
+        while z in errcache:
+            z = ran.randint(0,254)
+        msg[z] += gfe(ran.randint(1,254))
+         #msg[i] += (gfe(i+1)/(gfe(i+24)))
+    debug(1,"Errors inserted at positions:",*(i for i in errcache))
+    return msg
+
+def inserrRS(blocks, x):
+    errcache = []
+    for i in range(x):
+        z = ran.randint(0,254)
+        while z in errcache:
+            z = ran.randint(254)
+        errcache.append(z)
+    for block in blocks:
+        for i in errcache:
+            block[i] += gfe(ran.randint(1,254))
+
+set_loglevel(1)
+print("Welcome. Please enter your message:")
+message = input()
+enc_blocks = encode(message)
+print("Would you like to insert some errors into the blocks?")
+response = input("[y/N]")
+if not "y" in response.lower():
+    print(decode(enc_blocks))
+    exit(0)
+print("Would you like to insert random errors at:\n \
+    \trandom bytes for every block (rb)?\n\
+    \tthe same set of up to 16 random bytes applied to every block (rs)?")
+response = input().lower()
+if response == "rb":
+    errnums = ran.randint(1,16)
+    print("Inserting errors at",errnums,"random positions in each block")
+    for block in enc_blocks:
+        block = inserrRB(block, errnums)
+elif response == "rs":
+    errnums = ran.randint(1,16)
+    print("Inserting errors at the same",errnums,"positions in every block.")
+    enc_blocks = inserrRS(enc_blocks, errnums)
+
+print("Errors inserted")
+print(decode(enc_blocks))
+\end{lstlisting}
+\fi
+\pagebreak
+\lstlistoflistings
+\listoftables
+\pagebreak
+\printbibliography
+\pagebreak
+\section*{Eigenständigkeitserklärung}
+Ich erkläre hiermit, dass ich die Seminararbeit ohne fremde Hilfe angefertigt und nur die im Literaturverzeichnis angeführten Quellen und Hilfsmittel benützt habe.
+
+\begin{tabular}{l}
+    \\
+    \\
+    \\
+    \rule{\textwidth}{0.5pt}\\
+    Ort, Datum\hspace{4cm}Unterschrift des Verfassers
+\end{tabular}
+\end{document}
