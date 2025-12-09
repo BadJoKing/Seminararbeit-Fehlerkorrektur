@@ -1,3 +1,4 @@
+
 from gf256 import gf_element as gfe, poly, debug, set_loglevel, x
 import time
 import random as ran
@@ -87,7 +88,7 @@ def kgV(a, b):
         a, b = b, a
     a0 = a
     d0, d = ZERO, x(0)
-    while a.deg > MSGCHARS+ERRCHARS:
+    while b.deg >= MSGCHARS+ERRCHARS:
         tmp = a.divmod(b)
         f = tmp[0]
         a, b = b, tmp[1]
@@ -109,14 +110,16 @@ def errloc(res_poly):
 
 def inserrRB(message, x):
     msg = [i for i in message]
+    msg_0 = msg.copy()
     errcache = []
     for i in range(x):
         z = ran.randint(0,254)
         while z in errcache:
             z = ran.randint(0,254)
+        errcache.append(z)
         msg[z] += gfe(ran.randint(1,254))
-         #msg[i] += (gfe(i+1)/(gfe(i+24)))
     debug(1,"Errors inserted at positions:",*(i for i in errcache))
+    debug(2,msg == msg_0)
     return msg
 
 def inserrRS(blocks, x):
@@ -124,11 +127,12 @@ def inserrRS(blocks, x):
     for i in range(x):
         z = ran.randint(0,254)
         while z in errcache:
-            z = ran.randint(254)
+            z = ran.randint(0,254)
         errcache.append(z)
     for block in blocks:
         for i in errcache:
             block[i] += gfe(ran.randint(1,254))
+    return blocks
 
 set_loglevel(1)
 print("Welcome. Please enter your message:")
